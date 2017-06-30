@@ -49,6 +49,7 @@ import (
 
 // DefaultUnencryptedSuffix is the default suffix a TreeItem key has to end with for sops to leave its Value unencrypted
 const DefaultUnencryptedSuffix = "_unencrypted"
+const DefaultEncryptedSuffix = "_encrypted"
 
 type sopsError string
 
@@ -196,18 +197,31 @@ func (tree TreeBranch) walkBranch(in TreeBranch, path []string, onLeaves func(in
 	return in, nil
 }
 
+func (tree Tree) shouldBeEncrypted(path []string) bool {
+	var encrypted bool
+	var suffix string
+	if tree.Metadata.UnencryptedByDefault {
+		encrypted = false
+		suffix = tree.Metadata.EncryptedSuffix
+	} else {
+		encrypted = true
+		suffix = tree.Metadata.UnencryptedSuffix
+	}
+	for _, v := range path {
+		if strings.HasSuffix(v, suffix) {
+			encrypted = !encrypted
+			break
+		}
+	}
+	return encrypted
+}
+
 // Encrypt walks over the tree and encrypts all values with the provided cipher, except those whose key ends with the UnencryptedSuffix specified on the Metadata struct. If encryption is successful, it returns the MAC for the encrypted tree.
 func (tree Tree) Encrypt(key []byte, cipher DataKeyCipher, stash map[string][]interface{}) (string, error) {
 	hash := sha512.New()
 	_, err := tree.Branch.walkBranch(tree.Branch, make([]string, 0), func(in interface{}, path []string) (interface{}, error) {
 		bytes, err := ToBytes(in)
-		unencrypted := false
-		for _, v := range path {
-			if strings.HasSuffix(v, tree.Metadata.UnencryptedSuffix) {
-				unencrypted = true
-			}
-		}
-		if !unencrypted {
+		if tree.shouldBeEncrypted(path) {
 			var err error
 			pathString := strings.Join(path, ":") + ":"
 			// Pop from the left of the stash
@@ -239,13 +253,7 @@ func (tree Tree) Decrypt(key []byte, cipher DataKeyCipher, stash map[string][]in
 	hash := sha512.New()
 	_, err := tree.Branch.walkBranch(tree.Branch, make([]string, 0), func(in interface{}, path []string) (interface{}, error) {
 		var v interface{}
-		unencrypted := false
-		for _, v := range path {
-			if strings.HasSuffix(v, tree.Metadata.UnencryptedSuffix) {
-				unencrypted = true
-			}
-		}
-		if !unencrypted {
+		if tree.shouldBeEncrypted(path) {
 			var err error
 			var stashValue interface{}
 			pathString := strings.Join(path, ":") + ":"
@@ -285,8 +293,10 @@ func (tree Tree) GenerateDataKey() ([]byte, []error) {
 type Metadata struct {
 	LastModified              time.Time
 	UnencryptedSuffix         string
+	EncryptedSuffix           string
 	MessageAuthenticationCode string
 	Version                   string
+	UnencryptedByDefault      bool
 	KeySources                []KeySource
 }
 
@@ -423,6 +433,8 @@ func (m *Metadata) ToMap() map[string]interface{} {
 	out := make(map[string]interface{})
 	out["lastmodified"] = m.LastModified.Format(time.RFC3339)
 	out["unencrypted_suffix"] = m.UnencryptedSuffix
+	out["encrypted_suffix"] = m.EncryptedSuffix
+	out["unencrypted_by_default"] = m.UnencryptedByDefault
 	out["mac"] = m.MessageAuthenticationCode
 	out["version"] = m.Version
 	for _, ks := range m.KeySources {
@@ -493,6 +505,16 @@ func MapToMetadata(data map[string]interface{}) (Metadata, error) {
 		unencryptedSuffix = DefaultUnencryptedSuffix
 	}
 	metadata.UnencryptedSuffix = unencryptedSuffix
+	encryptedSuffix, ok := data["encrypted_suffix"].(string)
+	if !ok {
+		encryptedSuffix = DefaultEncryptedSuffix
+	}
+	metadata.EncryptedSuffix = encryptedSuffix
+	unencryptedByDefault, ok := data["unencrypted_by_default"].(bool)
+	if !ok {
+		unencryptedByDefault = false
+	}
+	metadata.UnencryptedByDefault = unencryptedByDefault
 	if metadata.Version, ok = data["version"].(string); !ok {
 		metadata.Version = strconv.FormatFloat(data["version"].(float64), 'f', -1, 64)
 	}

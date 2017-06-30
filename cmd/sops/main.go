@@ -64,9 +64,11 @@ func loadPlainFile(c *cli.Context, store sops.Store, fileName string, fileBytes 
 		return tree, err
 	}
 	tree.Metadata = sops.Metadata{
-		UnencryptedSuffix: c.String("unencrypted-suffix"),
-		Version:           version,
-		KeySources:        ks,
+		UnencryptedByDefault: c.Bool("partial-encryption"),
+		EncryptedSuffix:      c.String("encrypted-suffix"),
+		UnencryptedSuffix:    c.String("unencrypted-suffix"),
+		Version:              version,
+		KeySources:           ks,
 	}
 	tree.GenerateDataKey()
 	return
@@ -187,8 +189,17 @@ func main() {
 		},
 		cli.StringFlag{
 			Name:  "unencrypted-suffix",
-			Usage: "override the unencrypted key suffix. default: unencrypted_",
+			Usage: "override the unencrypted key suffix. default: _unencrypted",
 			Value: sops.DefaultUnencryptedSuffix,
+		},
+		cli.StringFlag{
+			Name:  "encrypted-suffix",
+			Usage: "override the encrypted key suffix. default: _encrypted",
+			Value: sops.DefaultEncryptedSuffix,
+		},
+		cli.BoolFlag{
+			Name:  "partial-encryption",
+			Usage: "only encrypt keys that match encrypted-suffix. default: false",
 		},
 		cli.StringFlag{
 			Name:  "config",
@@ -550,6 +561,8 @@ func loadExample(c *cli.Context, file string) (sops.Tree, error) {
 		return tree, err
 	}
 	tree.Metadata.UnencryptedSuffix = c.String("unencrypted-suffix")
+	tree.Metadata.EncryptedSuffix = c.String("encrypted-suffix")
+	tree.Metadata.UnencryptedByDefault = c.Bool("partial-encryption")
 	tree.Metadata.Version = version
 	tree.Metadata.KeySources = ks
 	key, errs := tree.GenerateDataKey()
